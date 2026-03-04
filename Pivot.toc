@@ -2,6 +2,6 @@
 ## Title: Pivot
 ## Notes: Rotate character models in Character, Inspect & Dressing Room frames by holding left mouse button. Ctrl+click on the Dressing Room frame to hide the background texture.
 ## Author: Drakensangs
-## Version: 1.0
+## Version: 1.1
 
 Pivot.lua
