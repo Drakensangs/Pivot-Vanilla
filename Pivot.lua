@@ -18,7 +18,7 @@
 
 local ROTATION_SENSITIVITY = 0.8
 local MOVE_INV_SENSITIVITY = 1 / 45  -- reciprocal: multiply instead of divide each frame
-local ZOOM_STEP            = 0.75       -- Z units per scroll tick
+local ZOOM_STEP            = 0.15    -- Z units per scroll tick
 
 local DEFAULT_FACING     = 35
 local DEFAULT_FACING_RAD = math.rad(DEFAULT_FACING)
@@ -30,34 +30,36 @@ local RESET_BUTTON_TEXTURE = "Interface\\AddOns\\Pivot\\reset\\reset"
 -- Localize globals used in hot paths (OnUpdate fires every frame while dragging).
 local GetCursorPosition = GetCursorPosition
 local math_rad          = math.rad
+local math_max          = math.max
+local IsControlKeyDown  = IsControlKeyDown
 
 local function _hideThis() this:Hide() end
 
 -- ── Dressing Room background toggle ──────────────────────────────────────────
--- Four panel frames are cached once so the toggle never touches _G.
+-- Frames are cached as direct locals once; no table allocation needed.
 
 local dressUpBgVisible = true
-local dressUpBgFrames  = {}
+local dressBg1, dressBg2, dressBg3, dressBg4
 
 local function SetupDressUpBgCache()
-    dressUpBgFrames[1] = DressUpBackgroundTopLeft
-    dressUpBgFrames[2] = DressUpBackgroundTopRight
-    dressUpBgFrames[3] = DressUpBackgroundBotLeft
-    dressUpBgFrames[4] = DressUpBackgroundBotRight
+    dressBg1 = DressUpBackgroundTopLeft
+    dressBg2 = DressUpBackgroundTopRight
+    dressBg3 = DressUpBackgroundBotLeft
+    dressBg4 = DressUpBackgroundBotRight
 end
 
 local function SetDressUpBackground(visible)
     dressUpBgVisible = visible
     if visible then
-        dressUpBgFrames[1]:Show()
-        dressUpBgFrames[2]:Show()
-        dressUpBgFrames[3]:Show()
-        dressUpBgFrames[4]:Show()
+        dressBg1:Show()
+        dressBg2:Show()
+        dressBg3:Show()
+        dressBg4:Show()
     else
-        dressUpBgFrames[1]:Hide()
-        dressUpBgFrames[2]:Hide()
-        dressUpBgFrames[3]:Hide()
-        dressUpBgFrames[4]:Hide()
+        dressBg1:Hide()
+        dressBg2:Hide()
+        dressBg3:Hide()
+        dressBg4:Hide()
     end
 end
 
@@ -72,7 +74,7 @@ end
 -- rightInset:   pixels to trim from the overlay's right edge.
 -- bottomInset:  pixels to trim from the overlay's bottom edge.
 -- withBgToggle: wire up Ctrl+click bg-toggle (Dressing Room only).
--- withResetBtn: create a reset button in the top-right corner of the frame.
+-- withResetBtn: create a reset button in the top-left corner of the frame.
 local function SetupModelInteraction(modelFrame, unit, rightInset, bottomInset, withBgToggle, withResetBtn)
     if not modelFrame then return end
 
@@ -82,13 +84,11 @@ local function SetupModelInteraction(modelFrame, unit, rightInset, bottomInset, 
     local SetRotation     = modelFrame.SetRotation  -- cached: avoids a table index per call
 
     -- ── Overlay ───────────────────────────────────────────────────────────────
-    -- Frame level is resolved once; math.max is not localised because it is
-    -- only called during this setup, never in a hot path.
-    local overlayLevel = math.max(modelFrame:GetFrameLevel(), 10) + 10
+    local overlayLevel = math_max(modelFrame:GetFrameLevel(), 10) + 10
 
     local overlay = CreateFrame("Frame", nil, modelFrame)
-    overlay:SetPoint("TOPLEFT",     modelFrame, "TOPLEFT",      0,           0)
-    overlay:SetPoint("BOTTOMRIGHT", modelFrame, "BOTTOMRIGHT", -rightInset,  bottomInset)
+    overlay:SetPoint("TOPLEFT",     modelFrame, "TOPLEFT",      0,          0)
+    overlay:SetPoint("BOTTOMRIGHT", modelFrame, "BOTTOMRIGHT", -rightInset, bottomInset)
     overlay:SetFrameLevel(overlayLevel)
     overlay:EnableMouse(true)
     overlay:EnableMouseWheel(true)
@@ -103,7 +103,6 @@ local function SetupModelInteraction(modelFrame, unit, rightInset, bottomInset, 
     end
 
     -- Zoom: mouse wheel adjusts the Z (depth) component of the model position.
-    -- Not a sustained hot path, so no special treatment needed.
     overlay:SetScript("OnMouseWheel", function()
         local Z, X, Y = modelFrame:GetPosition()
         modelFrame:SetPosition(Z + (arg1 > 0 and ZOOM_STEP or -ZOOM_STEP), X, Y)
@@ -130,7 +129,6 @@ local function SetupModelInteraction(modelFrame, unit, rightInset, bottomInset, 
         local dY = curY - lastY
         if dX ~= 0 or dY ~= 0 then
             local Z, X, Y = modelFrame:GetPosition()
-            -- Multiply by reciprocal instead of dividing each frame.
             modelFrame:SetPosition(Z, X + dX * MOVE_INV_SENSITIVITY,
                                       Y + dY * MOVE_INV_SENSITIVITY)
             lastX = curX
@@ -142,8 +140,6 @@ local function SetupModelInteraction(modelFrame, unit, rightInset, bottomInset, 
     -- for mouse-up events that the overlay misses when the cursor leaves it
     -- before the button is released.  It is shown only during a drag and sits
     -- below the overlay in frame level so it never steals normal clicks.
-    -- Using a dedicated frame avoids clobbering any OnMouseUp that another
-    -- addon may have registered on WorldFrame.
     local dragCatcher = CreateFrame("Frame", nil, UIParent)
     dragCatcher:SetAllPoints(UIParent)
     dragCatcher:SetFrameStrata("TOOLTIP")
@@ -225,18 +221,18 @@ local function SetupModelInteraction(modelFrame, unit, rightInset, bottomInset, 
 
     -- ── OnShow ────────────────────────────────────────────────────────────────
     -- Always resets the model.  Dressing Room variant also resets the background.
-    -- origShow is captured once; the guard prevents a call when it is nil.
-    local origShow = modelFrame:GetScript("OnShow")
+    -- For the Dressing Room (withBgToggle), origShow is not called because
+    -- Blizzard's OnShow resets the camera position after our frame adjustments.
     if withBgToggle then
         modelFrame:SetScript("OnShow", function()
             ResetModel()
             SetDressUpBackground(true)
-            if origShow then origShow() end
         end)
     else
+        local origShow = modelFrame:GetScript("OnShow")
         modelFrame:SetScript("OnShow", function()
-            ResetModel()
             if origShow then origShow() end
+            ResetModel()
         end)
     end
 end
@@ -249,19 +245,37 @@ local function HideRotateButton(btn)
 end
 
 -- ── Character Frame & Dressing Room ──────────────────────────────────────────
--- CharacterModelFrame: right=33 (resistance icons), bottom=12 (stat rows)
--- DressUpModel:        right=0,  bottom=16 (Reset/Close buttons)
 
 local charHook = CreateFrame("Frame")
 charHook:RegisterEvent("PLAYER_ENTERING_WORLD")
 charHook:SetScript("OnEvent", function()
     SetupDressUpBgCache()
-    SetupModelInteraction(CharacterModelFrame, "player", 33, 12,  nil,  true)
+
+    -- Trim CharacterModelFrame height so the model clips above the stat rows.
+    local cp, crt, crp, cx, cy = CharacterModelFrame:GetPoint()
+    CharacterModelFrame:ClearAllPoints()
+    CharacterModelFrame:SetHeight(CharacterModelFrame:GetHeight() - 9)
+    CharacterModelFrame:SetPoint(cp, crt, crp, cx, cy)
+    SetupModelInteraction(CharacterModelFrame, "player", 33, 0, nil, true)
     HideRotateButton(CharacterModelFrameRotateLeftButton)
     HideRotateButton(CharacterModelFrameRotateRightButton)
-    SetupModelInteraction(DressUpModel,         nil,      0,  16,  true, nil)
+
+    -- Resize and reposition DressUpModel so its bottom edge sits above the
+    -- button bar, letting the frame boundary clip the render naturally.
+    local p, rt, rp, x, y = DressUpModel:GetPoint()
+    DressUpModel:ClearAllPoints()
+    DressUpModel:SetHeight(331)
+    DressUpModel:SetPoint(p, rt, rp, x, y + 20)
+    SetupModelInteraction(DressUpModel, nil, 0, 16, true, nil)
+    -- Take full ownership of the Reset button so we control the entire reset
+    -- sequence: Dress() redresses without a full reload, then rotation is restored.
+    DressUpFrameResetButton:SetScript("OnClick", function()
+        DressUpModel:Dress()
+        DressUpModel:SetRotation(DEFAULT_FACING_RAD)
+    end)
     HideRotateButton(DressUpModelRotateLeftButton)
     HideRotateButton(DressUpModelRotateRightButton)
+
     -- Unregister the event and release the closure and its upvalues.
     charHook:UnregisterEvent("PLAYER_ENTERING_WORLD")
     charHook:SetScript("OnEvent", nil)
