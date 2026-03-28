@@ -1,6 +1,6 @@
 # 🔄 **Pivot** (Vanilla 1.12.1)
 
-A simple and lightweight addon that allows character model rotation, zoom and pan on the Character, Inspect and Dressing Room screens by using the mouse. Removes the default rotate buttons and replaces them with a reset model button. Also allows hiding the Dressing Room background texture by using Ctrl+click.
+A simple and lightweight addon that allows character model rotation, zoom and pan on the Character, Inspect, (Auction House) Dressing Room and Pet screens by using the mouse. Removes the default rotate buttons and replaces them with a reset model button. Also allows hiding the Dressing Room background texture by using Ctrl+click.
 
 To change the zoom amount, simply modify `local ZOOM_STEP` in `Pivot.lua`.
 
